@@ -1,0 +1,6 @@
+services:
+  app:
+    build: .
+    image: my-app:local
+    ports:
+      - "8080:8080"

@@ -1,88 +1,80 @@
 pipeline {
     agent any
 
-    environment {
-        SONARQUBE_SERVER = 'http://your-sonarqube-server'  // The URL to your SonarQube server
-        SONARQUBE_CREDENTIALS = 'sonarqube-credentials-id'  // The Jenkins credentials ID for SonarQube login
-        DOCKER_IMAGE = 'your-docker-image'  // Name of the Docker image (e.g., myregistry.com/myapp)
-        REGISTRY_CREDENTIALS = 'docker-registry-credentials-id'  // The Jenkins credentials ID for your Docker registry
-        REGISTRY_URL = 'your-docker-registry-url'  // The URL to your Docker registry (e.g., docker.io or myregistry.com)
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        timeout(time: 30, unit: 'MINUTES')
+    }
+
+    parameters {
+        booleanParam(name: 'ANALYZE', defaultValue: false, description: 'Run SonarQube and wait for the quality gate. The server in Jenkins must be named SonarQube.')
+        booleanParam(name: 'PUBLISH', defaultValue: false, description: 'Build the image, push it, and apply the manifests. Needs a Linux agent with Docker and kubectl.')
+        string(name: 'IMAGE', defaultValue: 'example.com/my-app', description: 'Image name without a tag. The tag is BUILD_NUMBER.')
+        string(name: 'REGISTRY', defaultValue: 'https://index.docker.io/v1/', description: 'Registry endpoint for docker.withRegistry.')
     }
 
     stages {
         stage('Checkout') {
             steps {
-                git 'https://github.com/davraops/ci-cd-with-jenkins.git'
-            }
-        }
-
-        stage('Build') {
-            steps {
-                script {
-                    sh 'mvn clean install'
-                }
-            }
-        }
-
-        stage('Static Code Analysis') {
-            steps {
-                script {
-                    withSonarQubeEnv('SonarQube') {
-                        sh 'mvn sonar:sonar -Dsonar.host.url=${env.SONARQUBE_SERVER} -Dsonar.login=${env.SONARQUBE_CREDENTIALS}'
-                    }
-                }
+                checkout scm
             }
         }
 
         stage('Test') {
             steps {
-                script {
-                    sh 'mvn test'
+                sh 'mvn -B verify'
+            }
+        }
+
+        stage('SonarQube') {
+            when { expression { return params.ANALYZE == true } }
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    sh 'mvn -B org.sonarsource.scanner.maven:sonar-maven-plugin:3.11.0.3922:sonar'
                 }
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Quality gate') {
+            when { expression { return params.ANALYZE == true } }
             steps {
-                script {
-                    sh "docker build -t ${env.DOCKER_IMAGE}:${env.BUILD_ID} ."
+                timeout(time: 10, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
                 }
             }
         }
 
-        stage('Push Docker Image') {
+        stage('Image') {
+            when { expression { return params.PUBLISH == true } }
+            steps {
+                sh "docker build -t ${params.IMAGE}:${env.BUILD_NUMBER} ."
+            }
+        }
+
+        stage('Push') {
+            when { expression { return params.PUBLISH == true } }
             steps {
                 script {
-                    docker.withRegistry(env.REGISTRY_URL, env.REGISTRY_CREDENTIALS) {
-                        docker.image("${env.DOCKER_IMAGE}:${env.BUILD_ID}").push()
+                    docker.withRegistry(params.REGISTRY, 'registry-credentials') {
+                        docker.image("${params.IMAGE}:${env.BUILD_NUMBER}").push()
                     }
                 }
             }
         }
 
         stage('Deploy') {
+            when { expression { return params.PUBLISH == true } }
             steps {
-                script {
-                    sh 'kubectl apply -f k8s/deployment.yaml'
-                }
+                sh "sed 's|__IMAGE__|${params.IMAGE}:${env.BUILD_NUMBER}|' k8s/deployment.yaml | kubectl apply -f -"
+                sh 'kubectl apply -f k8s/service.yaml'
             }
         }
     }
 
     post {
         always {
-            archiveArtifacts artifacts: '**/target/*.jar', allowEmptyArchive: true
-            junit 'target/surefire-reports/*.xml'
-        }
-        success {
-            mail to: 'your-email@example.com',
-                 subject: "Jenkins Build ${env.BUILD_ID} Successful",
-                 body: "The Jenkins build ${env.BUILD_ID} was successful. The application has been deployed."
-        }
-        failure {
-            mail to: 'your-email@example.com',
-                 subject: "Jenkins Build ${env.BUILD_ID} Failed",
-                 body: "The Jenkins build ${env.BUILD_ID} has failed. Please check the Jenkins console output for more details."
+            junit testResults: 'target/surefire-reports/*.xml'
         }
     }
 }

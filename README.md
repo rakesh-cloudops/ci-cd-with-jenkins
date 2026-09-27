@@ -1,79 +1,51 @@
 # CI/CD with Jenkins
 
-## Overview
-This repository demonstrates a complete CI/CD pipeline using Jenkins. It showcases how to build, test, and deploy a Java application while integrating static code analysis, Docker containerization, and deployment to Kubernetes.
+Public sample from the [portfolio index](https://github.com/davraops/devsecops-portfolio). A Java 21 service, a Jenkins pipeline, and the image it ships.
 
-## Features
-- **Automated Build**: Builds the Java project using Maven.
-- **Static Code Analysis**: Utilizes SonarQube to perform code quality checks.
-- **Unit Testing**: Executes tests and reports results using Maven.
-- **Dockerization**: Builds and pushes Docker images to a registry.
-- **Kubernetes Deployment**: Deploys the application to a Kubernetes cluster.
+`/health` returns `ok` on port 8080. The unit test calls that endpoint. The pipeline does not deploy unless you ask it to.
 
-## Prerequisites
-- Java 8 or higher
-- Maven
-- Docker
-- Kubernetes (e.g., Minikube, EKS, GKE)
-- Jenkins with necessary plugins installed:
-  - Pipeline
-  - Git
-  - Maven Integration
-  - SonarQube Scanner
-  - Docker Pipeline
+## Run the tests
 
-## Setup Instructions
+JDK 21 and Maven 3.9.
 
-### Clone the Repository
 ```bash
-git clone https://github.com/davraops/ci-cd-with-jenkins.git
-cd ci-cd-with-jenkins
+mvn -B verify
+```
 
-# Configure Jenkins
+Local image:
 
-## Set up Jenkins Credentials
+```bash
+docker compose up --build
+curl http://127.0.0.1:8080/health
+```
 
-1. **Navigate to "Manage Jenkins" > "Manage Credentials".**
-2. **Store credentials for SonarQube and Docker registry:**
-   - **SonarQube Credentials**: Add a 'Username with password' credential for SonarQube access.
-   - **Docker Registry Credentials**: Add a 'Username with password' credential for Docker registry access.
+## Jenkins
 
-## Install Necessary Plugins
+Create a Pipeline job from SCM pointed at this repo. The agent needs JDK 21, Maven 3.9, and a Linux shell. Docker and kubectl are only required when you enable publish.
 
-- Ensure your Jenkins setup has all required plugins installed and configured.
+Plugins: Pipeline, Git, Docker Pipeline, SonarQube Scanner.
 
-## Configure Environment Variables
+Default build runs checkout and `mvn verify`. Two parameters turn on the rest:
 
-Set up environment variables in your Jenkins pipeline configuration for:
-- `SONARQUBE_SERVER`: URL to your SonarQube server.
-- `REGISTRY_URL`: URL to your Docker registry.
-- `DOCKER_IMAGE`: Name of the Docker Image to be used.
-- `REGISTRY_CREDENTIALS`: The Jenkins credentials ID for your Docker registry
-- `REGISTRY_URL`: The URL to your Docker registry (e.g., docker.io or myregistry.com)
+| Parameter | What it does |
+| --- | --- |
+| `ANALYZE` | SonarQube, then the quality gate. The server configured in Jenkins must be named `SonarQube`. SonarQube needs a webhook to `https://<jenkins>/sonarqube-webhook/`. The token stays in the Jenkins credential. The pipeline does not pass `sonar.login`. |
+| `PUBLISH` | `docker build`, push with the credential id `registry-credentials`, then `kubectl apply`. The image tag is `BUILD_NUMBER`. `__IMAGE__` in the deployment is replaced with `IMAGE:BUILD_NUMBER`. |
 
-# CI/CD Pipeline
+`REGISTRY` defaults to Docker Hub (`https://index.docker.io/v1/`). `IMAGE` defaults to `example.com/my-app`.
 
-## Pipeline Stages
+## What the pipeline does
 
-1. **Checkout**: Clones the code from GitHub.
-2. **Build**: Compiles the project using Maven.
-3. **Static Code Analysis**: Runs SonarQube analysis using credentials securely.
-4. **Test**: Runs unit tests with Maven.
-5. **Build Docker Image**: Builds a Docker image of the application.
-6. **Push Docker Image**: Pushes the image to a Docker registry using secured credentials.
-7. **Deploy**: Deploys the application to a Kubernetes cluster.
+1. Checkout from the job SCM.
+2. `mvn -B verify`.
+3. SonarQube and quality gate, only with `ANALYZE`.
+4. Image, push, and deploy, only with `PUBLISH`.
 
-## Jenkinsfile
+## Layout
 
-- Refer to the `Jenkinsfile` in the repository which contains the detailed pipeline configuration. It utilizes environment variables and credentials stored in Jenkins to manage sensitive data securely.
+- `Jenkinsfile` is the pipeline.
+- `Dockerfile` is a two-stage build. The runtime user is uid 10001, the same id the pod uses.
+- `k8s/deployment.yaml` sets requests, limits, probes, and a non-root read-only filesystem.
+- `k8s/service.yaml` publishes port 80 to container port 8080.
 
-# Usage
-
-## Running the Pipeline
-
-1. **Start a Build**: Trigger a build from the Jenkins dashboard.
-2. **Monitor Output**: View the pipeline execution in real time within Jenkins to verify each step.
-
-# Contributing
-
-- Contributions are welcome. Please fork the repository and submit a pull request with your changes.
+MIT. See [License.md](License.md).
