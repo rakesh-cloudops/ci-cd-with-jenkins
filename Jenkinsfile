@@ -68,7 +68,9 @@ pipeline {
         stage('Deploy') {
             when { expression { return params.PUBLISH == true } }
             steps {
-                sh "sed 's|__IMAGE__|${params.IMAGE}:${env.BUILD_NUMBER}|' k8s/deployment.yaml | kubectl apply -f -"
+                sh """ 
+                   sed 's|__IMAGE__|${params.IMAGE}:${env.BUILD_NUMBER}|' k8s/deployment.yaml | kubectl apply -f - 
+                   """
                 sh 'kubectl apply -f k8s/service.yaml'
             }
         }
