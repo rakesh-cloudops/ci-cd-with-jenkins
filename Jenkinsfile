@@ -1,5 +1,7 @@
 pipeline {
-    agent any
+    agent {
+        label 'k3s-worker'
+    }
 
     options {
         timestamps()
