@@ -1,4 +1,3 @@
-```groovy
 pipeline {
     agent {
         label 'k3s-worker'
@@ -158,4 +157,3 @@ pipeline {
         }
     }
 }
-```
